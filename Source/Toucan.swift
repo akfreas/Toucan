@@ -35,6 +35,8 @@ let resizedImage = Toucan.resize(myImage, size: CGSize(width: 100, height: 150))
 Or create an instance for easy method chaining:
 let resizedAndMaskedImage = Toucan(withImage: myImage).resize(CGSize(width: 100, height: 150)).maskWithEllipse().image
 */
+
+
 public class Toucan : NSObject {
     
     public var image : UIImage
@@ -58,6 +60,16 @@ public class Toucan : NSObject {
     */
     public func resize(size: CGSize, fitMode: Toucan.Resize.FitMode = .Clip) -> Toucan {
         self.image = Toucan.Resize.resizeImage(self.image, size: size, fitMode: fitMode)
+        return self
+    }
+    
+    public func resizeByEdge(edge: Toucan.Resize.ResizeEdge, value: CGFloat) -> Toucan {
+        self.image = Toucan.Resize.resizeImageByEdge(self.image, edge: edge, value: value)
+        return self
+    }
+    
+    public func cropToRect(rect: CGRect) -> Toucan {
+        self.image = Toucan.Util.croppedImageWithRect(image, rect: rect)
         return self
     }
     
@@ -145,6 +157,12 @@ public class Toucan : NSObject {
             case Scale
         }
         
+        
+        public enum ResizeEdge {
+            case Width
+            case Height
+        }
+        
         /**
         Resize an image to the specified size. Depending on what fitMode is supplied, the image
         may be clipped, cropped or scaled. @see documentation on FitMode.
@@ -179,6 +197,38 @@ public class Toucan : NSObject {
             case .Scale:
                 return Util.drawImageInBounds(resizedImage, bounds: CGRect(x: 0, y: 0, width: size.width, height: size.height))
             }
+        }
+        
+        public static func resizeImageByEdge(image: UIImage, edge: ResizeEdge, value: CGFloat) -> UIImage {
+            
+            
+            let imgRef = Util.CGImageWithCorrectOrientation(image)
+            
+            let originalWidth  = CGFloat(CGImageGetWidth(imgRef))
+            let originalHeight = CGFloat(CGImageGetHeight(imgRef))
+            var ratio : CGFloat!
+            var width : CGFloat
+            var height : CGFloat
+            
+            
+            switch edge {
+                
+            case .Height:
+                ratio = value / originalHeight
+                height = value
+                width = round(ratio * originalWidth)
+                
+            case .Width:
+                ratio = value / originalWidth
+                width = value
+                height = round(ratio * originalHeight)
+                
+            }
+            
+            let resizedImageBounds = CGRect(x: 0, y: 0, width: width, height: height)
+            let resizedImage = Util.drawImageInBounds(image, bounds: resizedImageBounds)
+            
+            return resizedImage
         }
     }
     
@@ -490,63 +540,78 @@ public class Toucan : NSObject {
         - returns: CGImageRef with rotated/transformed image context
         */
         static func CGImageWithCorrectOrientation(image : UIImage) -> CGImageRef {
-            
             if (image.imageOrientation == UIImageOrientation.Up) {
                 return image.CGImage!
             }
             
+            let transform = transformForCorrectImageOrientation(image)
+            
+            var width : Int
+            var height : Int
+            
+            switch (image.imageOrientation) {
+                
+            case .Left, .LeftMirrored, .Right, .RightMirrored:
+                width = CGImageGetHeight(image.CGImage)
+                height = CGImageGetWidth(image.CGImage)
+                
+            default:
+                width = CGImageGetWidth(image.CGImage)
+                height = CGImageGetHeight(image.CGImage)
+            }
+            
+            let context : CGContextRef = CGBitmapContextCreate(nil,
+                width,
+                height,
+                CGImageGetBitsPerComponent(image.CGImage),
+                0,
+                CGImageGetColorSpace(image.CGImage),
+                CGImageGetBitmapInfo(image.CGImage).rawValue)!;
+            CGContextConcatCTM(context, transform);
+            
+            CGContextDrawImage(context, CGRectMake(0, 0, CGFloat(width), CGFloat(height)), image.CGImage);
+            let cgImage = CGBitmapContextCreateImage(context);
+            return cgImage!
+        }
+        
+        
+        static func transformForCorrectImageOrientation(image: UIImage) -> CGAffineTransform {
+            
             var transform : CGAffineTransform = CGAffineTransformIdentity;
             
             switch (image.imageOrientation) {
-                case UIImageOrientation.Right, UIImageOrientation.RightMirrored:
-                    transform = CGAffineTransformTranslate(transform, 0, image.size.height)
-                    transform = CGAffineTransformRotate(transform, CGFloat(-1.0 * M_PI_2))
-                    break
-                case UIImageOrientation.Left, UIImageOrientation.LeftMirrored:
-                    transform = CGAffineTransformTranslate(transform, image.size.width, 0)
-                    transform = CGAffineTransformRotate(transform, CGFloat(M_PI_2))
-                    break
-                case UIImageOrientation.Down, UIImageOrientation.DownMirrored:
-                    transform = CGAffineTransformTranslate(transform, image.size.width, image.size.height)
-                    transform = CGAffineTransformRotate(transform, CGFloat(M_PI))
-                    break
-                default:
-                    break
+                
+            case UIImageOrientation.Right, UIImageOrientation.RightMirrored:
+                transform = CGAffineTransformScale(transform, image.size.width/image.size.height, image.size.height/image.size.width)
+                transform = CGAffineTransformTranslate(transform, 0, image.size.width)
+                transform = CGAffineTransformRotate(transform, CGFloat(-M_PI_2))
+
+            case UIImageOrientation.Left, UIImageOrientation.LeftMirrored:
+                transform = CGAffineTransformScale(transform, image.size.width/image.size.height, image.size.height/image.size.width)
+                transform = CGAffineTransformTranslate(transform, image.size.height, 0)
+                transform = CGAffineTransformRotate(transform, CGFloat(M_PI_2))
+                
+            case UIImageOrientation.Down, UIImageOrientation.DownMirrored:
+                transform = CGAffineTransformTranslate(transform, image.size.width, image.size.height)
+                transform = CGAffineTransformRotate(transform, CGFloat(M_PI))
+                
+            default:
+                break
             }
             
             switch (image.imageOrientation) {
-                case UIImageOrientation.RightMirrored, UIImageOrientation.LeftMirrored:
-                    transform = CGAffineTransformTranslate(transform, image.size.height, 0);
-                    transform = CGAffineTransformScale(transform, -1, 1);
-                    break
-                case UIImageOrientation.DownMirrored, UIImageOrientation.UpMirrored:
-                    transform = CGAffineTransformTranslate(transform, image.size.width, 0);
-                    transform = CGAffineTransformScale(transform, -1, 1);
-                    break
-                default:
-                    break
+            case UIImageOrientation.RightMirrored, UIImageOrientation.LeftMirrored:
+                transform = CGAffineTransformTranslate(transform, image.size.height, 0);
+                transform = CGAffineTransformScale(transform, -1, 1);
+                
+            case UIImageOrientation.DownMirrored, UIImageOrientation.UpMirrored:
+                transform = CGAffineTransformTranslate(transform, image.size.width, 0);
+                transform = CGAffineTransformScale(transform, -1, 1);
+                
+            default:
+                break
             }
-            
-            let context : CGContextRef = CGBitmapContextCreate(nil, CGImageGetWidth(image.CGImage), CGImageGetHeight(image.CGImage),
-                CGImageGetBitsPerComponent(image.CGImage),
-                CGImageGetBytesPerRow(image.CGImage),
-                CGImageGetColorSpace(image.CGImage),
-                CGImageGetBitmapInfo(image.CGImage).rawValue)!;
-            
-            CGContextConcatCTM(context, transform);
-            
-            switch (image.imageOrientation) {
-                case UIImageOrientation.Left, UIImageOrientation.LeftMirrored,
-                     UIImageOrientation.Right, UIImageOrientation.RightMirrored:
-                    CGContextDrawImage(context, CGRectMake(0, 0, image.size.height, image.size.width), image.CGImage);
-                    break;
-                default:
-                    CGContextDrawImage(context, CGRectMake(0, 0, image.size.width, image.size.height), image.CGImage);
-                    break;
-            }
-            
-            let cgImage = CGBitmapContextCreateImage(context);
-            return cgImage!;
+            return transform
         }
         
         /**
@@ -561,6 +626,13 @@ public class Toucan : NSObject {
             return drawImageWithClosure(size: bounds.size) { (size: CGSize, context: CGContext) -> () in
                 image.drawInRect(bounds)
             };
+        }
+        
+        static func drawImageInBounds(image: CGImageRef, bounds: CGRect) -> UIImage {
+            
+            return drawImageWithClosure(size: bounds.size) { size, context in
+                CGContextDrawImage(context, bounds, image)
+            }
         }
         
         /**
@@ -589,7 +661,7 @@ public class Toucan : NSObject {
         */
         static func drawImageWithClosure(size size: CGSize!, closure: (size: CGSize, context: CGContext) -> ()) -> UIImage {
             UIGraphicsBeginImageContextWithOptions(size, false, 0)
-            closure(size: size, context: UIGraphicsGetCurrentContext()!)
+            closure(size: size, context: UIGraphicsGetCurrentContext())
             let image : UIImage = UIGraphicsGetImageFromCurrentImageContext()
             UIGraphicsEndImageContext()
             return image
